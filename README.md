@@ -1,68 +1,96 @@
-# IBM Hackathon GitHub Project Template
+# RevisorIA — AI Code Review Copilot
 
-This GitHub project template is for IBM Hackathon projects. It includes pre-configured security files to help prevent accidental credential commits and potential account suspension during the hackathon.
+RevisorIA analyzes Pull Requests and flags risk, missing tests, and security
+issues in seconds — built for the **IBM Bob 2.0 Hackathon**.
 
-## 🚀 Quick Start
+## The problem
 
-1. **Use this template to create your project:**
-   - Click "Use this template" button above and select "Create a new repository"
-   - Name your repository
-   - Click "Create repository"
+Reviewing a Pull Request today means reading through every changed line by
+hand, checking whether tests were added, hunting for security issues that
+aren't obvious at a glance, and guessing how risky the change really is.
+It's slow, error-prone, and depends entirely on the reviewer's attention and
+experience — a problem every dev team runs into, regardless of size.
 
-2. **Clone your new repository:**
+## The solution
 
-   ```bash
-   git clone https://github.com/HACKATHON-ORG/your-repo-name.git
-   cd your-repo-name
-   ```
+RevisorIA takes a Pull Request and returns a clear report in seconds:
 
-3. **Set up environment variables:**
+- A **risk score** (Low / Medium / High)
+- Concrete **findings** across security, test coverage, and documentation
+- An actionable **checklist** of what to fix before merging
 
-   ```bash
-   # Copy the example file
-   cp .env.example .env
+## How IBM Bob 2.0 was used
 
-   # Edit .env with your actual credentials
-   # Use your preferred editor (nano, vim, code, etc.)
-   nano .env
-   ```
+The analysis engine is built around three specialized IBM Bob 2.0 Modes,
+each with its own scope and instructions:
 
-4. **Verify .gitignore is working:**
+- **Security** — scans for hardcoded credentials, unvalidated input, and
+  unsafe dependency usage.
+- **Tests** — checks whether changed code has corresponding test coverage.
+- **Documentation** — checks whether the README/docs still reflect the
+  actual state of the code.
 
-   ```bash
-   # This should NOT show .env file
-   git status
+These three subagents are launched **in parallel** from an orchestrator Mode
+(Agent Mode, with the Subagent tool enabled), instead of running one after
+another — cutting a review that would take a person 20–30 minutes down to
+seconds. Bob's document understanding is also used to read a PR's README
+during review.
 
-   # This should confirm .env is ignored
-   git check-ignore -v .env
-   ```
+Bob was run manually inside its IDE against a small sample repository
+([`revisoria-sample-app`](https://github.com/jimmisitop/revisoria-sample-app))
+with three prepared Pull Requests, one for each risk level. All three
+results were **real, unscripted analysis** — Bob surfaced issues we hadn't
+explicitly planted, including a genuine `ReferenceError` bug in one of the
+demo PRs.
 
-5. **Start developing!**
+## Architecture
 
-## 🔒 Security Features
+- The backend fetches real PR data from the GitHub REST API.
+- Analysis results are served from a **pre-generated cache**
+  (`server/src/analysis-cache.json`), built by manually running Bob's three
+  subagents on the sample PRs above. This keeps the full flow — GitHub →
+  backend → AI result → frontend — genuinely working end to end, without
+  incurring live API costs on every demo run.
+- The analysis entry point (`analyzePullRequest()`) is provider-agnostic:
+  it checks the cache first, and falls back to `callLiveAIProvider()` — a
+  placeholder any team can fill in to connect a live AI provider (Bob, Jev,
+  or otherwise) without touching the rest of the system.
+- The original direct integration with Bob's CLI (`analyzeWithBob()`) is
+  kept in the codebase, disconnected, as a reference implementation of how
+  a live connection would work.
 
-This template includes:
+## Tech stack
 
-- **`.gitignore`** - Prevents committing credentials and live session files
-- **`.bobignore`** - Prevents AI assistants from logging credentials
-- **`.env.example`** - Template for your environment variables
+| Layer | Technology |
+|---|---|
+| Frontend | React (Vite) |
+| Backend | Node.js + Express |
+| AI analysis | IBM Bob 2.0 (Security / Tests / Documentation subagents) |
+| Source data | GitHub REST API |
 
-## 📋 Before Every Commit
+## Running locally
 
-Always run this checklist:
+```bash
+# Backend
+cd server
+pnpm install
+pnpm run dev
 
-- [ ] Reviewed `git diff` for sensitive data
-- [ ] No hardcoded API keys or passwords
-- [ ] `.env` file is NOT in staged changes
-- [ ] No files with "credential" or "secret" in name
-- [ ] Used environment variables for all credentials
+# Frontend
+cd client
+pnpm install
+pnpm run dev
+```
 
-## 🆘 Need Help?
+The backend expects a `.env` file (see `.env.example`) with a `GITHUB_TOKEN`
+for higher API rate limits. No AI provider credentials are required to run
+the cached demo flow.
 
-- Read [SECURITY.md](SECURITY.MD) for detailed guidelines
-- Contact hackathon support through mentor channel
-- Ask in the hackathon Slack workspace
+## Security
 
----
+No credentials are committed to this repository. `.env` and `.bobignore`
+are excluded from version control — see `SECURITY.md` for details.
 
-**Remember:** Security is everyone's responsibility. When in doubt, ask for help!
+## Team
+
+Built by jimmisitop and Vinay Sikarwar for the IBM Bob 2.0 Hackathon.
