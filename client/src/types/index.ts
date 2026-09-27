@@ -17,9 +17,10 @@ export interface FindingItem {
     | "best_practice";
   title: string;
   description: string;
-  severity: "high" | "medium" | "low";
+  severity: "high" | "medium" | "low" | "unspecified";
+  remediation?: string;
   files?: string[];
-  subagent: "security" | "tests" | "documentation";
+  subagent: "security" | "tests" | "documentation" | "unknown";
 }
 
 export interface ChangedFile {

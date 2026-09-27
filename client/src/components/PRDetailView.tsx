@@ -44,6 +44,7 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
   const [selectedFileIndex, setSelectedFileIndex] = useState(0);
   const [isPostingComment, setIsPostingComment] = useState(false);
   const [actionSuccessMessage, setActionSuccessMessage] = useState<string | null>(null);
+  const [actionError, setActionError] = useState<string | null>(null);
 
   // Sync state if props change
   React.useEffect(() => {
@@ -52,33 +53,37 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
 
   // Handle checklist item toggle
   const handleToggleChecklist = async (itemId: string) => {
+    setActionError(null);
     try {
       const updated = await api.toggleChecklistItem(pr.id, itemId);
       if (updated) {
         setPr(updated);
         onUpdatePR(updated);
+      } else {
+        setActionError('Could not update the checklist. Check that the updated server is running and try again.');
       }
     } catch (e) {
       console.error('Failed to toggle checklist item', e);
     }
   };
 
-  // Post verdict to GitHub simulation
+  // Show success only when the server confirms the review was posted.
   const handlePostVerdict = async (type: 'approve' | 'request_changes') => {
+    if (isPostingComment) return;
     setIsPostingComment(true);
     setActionSuccessMessage(null);
+    setActionError(null);
     try {
-      const res = await api.postComment(pr.id, type);
+      const res = await api.postComment(pr.id, type, pr.repo);
+      if (!res.success) {
+        setActionError(res.message);
+        return;
+      }
       if (res.success && res.pr) {
         setPr(res.pr);
         onUpdatePR(res.pr);
       }
-      setActionSuccessMessage(
-        type === 'approve'
-          ? 'Approved on GitHub! All required items resolved.'
-          : 'Changes requested on GitHub. Bob 2.0 findings attached.'
-      );
-      setTimeout(() => setActionSuccessMessage(null), 4000);
+      setActionSuccessMessage(res.message);
     } catch (e) {
       console.error(e);
     } finally {
@@ -97,6 +102,10 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
 
   return (
     <div className="p-8 max-w-7xl mx-auto space-y-6">
+      <div role="note" className="rounded-xl border border-blue-200 bg-blue-50 p-4 text-xs text-blue-900 leading-relaxed">
+        <strong>Notices only — human review still required.</strong> These buttons post comments to GitHub, not formal approvals. They do not merge, close, or delete the PR or its branch.
+        {' '}You can analyze this PR again, with or without new commits. Saved analyses are reused and may still show findings that have already been fixed.
+      </div>
       {/* Top Breadcrumb Navigation matching screenshot */}
       <div>
         <button
@@ -261,6 +270,12 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
         </div>
       )}
 
+      {actionError && (
+        <div role="alert" className="p-3.5 bg-rose-50 border border-rose-200 text-rose-800 rounded-xl text-xs">
+          {actionError}
+        </div>
+      )}
+
       {/* OVERVIEW TAB CONTENT (3 Columns matching bottom-left screenshot) */}
       {activeTab === 'overview' && (
         <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
@@ -350,7 +365,7 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
               {pr.findings.length === 0 && (
                 <div className="py-8 text-center text-slate-400 text-xs">
                   <CheckCircle2 className="w-8 h-8 text-emerald-500 mx-auto mb-2" />
-                  No high risk findings flagged by Bob 2.0 subagents.
+                  No findings were included in this report.
                 </div>
               )}
             </div>
@@ -365,6 +380,7 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
               </div>
 
               <div className="space-y-3.5 pt-1">
+                {pr.checklist.length === 0 && <p className="text-xs text-slate-500">No checklist actions were provided.</p>}
                 {pr.checklist.map((item) => {
                   const isChecked = item.completed;
                   const isWarning = item.status === 'warning' && !isChecked;
@@ -426,14 +442,14 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
                 onClick={() => handlePostVerdict('request_changes')}
                 className="flex-1 py-2 px-3 text-[11px] font-semibold bg-rose-50 hover:bg-rose-100 text-rose-700 rounded-xl transition-colors disabled:opacity-50"
               >
-                Request Changes
+                Post Change Request
               </button>
               <button
                 disabled={isPostingComment}
                 onClick={() => handlePostVerdict('approve')}
                 className="flex-1 py-2 px-3 text-[11px] font-semibold bg-emerald-600 hover:bg-emerald-700 text-white rounded-xl shadow-xs transition-colors disabled:opacity-50"
               >
-                Approve PR
+                Suggest Approval
               </button>
             </div>
           </div>
@@ -517,6 +533,7 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
           </div>
 
           <div className="space-y-4">
+            {pr.findings.length === 0 && <p className="text-xs text-slate-500">No findings were included in this report.</p>}
             {pr.findings.map((f, i) => (
               <div key={f.id} className="p-4 rounded-xl border border-slate-200/80 bg-slate-50/50 space-y-2">
                 <div className="flex items-center justify-between">
@@ -528,15 +545,21 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
                   </span>
                   <span
                     className={`text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-full ${
-                      f.severity === 'high' ? 'bg-rose-100 text-rose-700' : 'bg-amber-100 text-amber-700'
+                      f.severity === 'high' ? 'bg-rose-100 text-rose-700' : f.severity === 'medium' ? 'bg-amber-100 text-amber-700' : f.severity === 'low' ? 'bg-emerald-100 text-emerald-700' : 'bg-slate-100 text-slate-600'
                     }`}
                   >
-                    {f.severity} severity
+                    {f.severity === 'unspecified' ? 'Severity: Not specified' : `${f.severity} severity`}
                   </span>
                 </div>
                 <p className="text-xs text-slate-600 pl-7">{f.description}</p>
+                {f.files && f.files.length > 0 && (
+                  <p className="text-[11px] font-mono text-slate-500 pl-7 break-words">Files: {f.files.join(', ')}</p>
+                )}
+                {f.remediation && (
+                  <p className="text-xs text-slate-700 pl-7"><strong>Recommended action: </strong>{f.remediation}</p>
+                )}
                 <div className="pl-7 pt-2 flex items-center gap-2 text-[11px] text-blue-600 font-semibold">
-                  <span>Subagent: {f.subagent.toUpperCase()} SCANNER</span>
+                  <span>{f.subagent === 'unknown' ? 'Source not specified' : `Subagent: ${f.subagent.toUpperCase()} SCANNER`}</span>
                 </div>
               </div>
             ))}
@@ -551,10 +574,12 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
             <h3 className="text-sm font-bold text-slate-900">Pre-Merge Action Checklist</h3>
             <p className="text-xs text-slate-500 mt-0.5">
               Items must be satisfied or acknowledged before approving this pull request.
+              {' '}Resolution is saved for this server session only.
             </p>
           </div>
 
           <div className="space-y-3">
+            {pr.checklist.length === 0 && <p className="text-xs text-slate-500">No checklist actions were provided.</p>}
             {pr.checklist.map((item) => (
               <div
                 key={item.id}
@@ -589,16 +614,18 @@ export const PRDetailView: React.FC<PRDetailViewProps> = ({
 
           <div className="flex items-center justify-end gap-3 pt-4 border-t border-slate-100">
             <button
+              disabled={isPostingComment}
               onClick={() => handlePostVerdict('request_changes')}
               className="px-4 py-2 text-xs font-semibold text-rose-600 bg-rose-50 hover:bg-rose-100 rounded-xl"
             >
-              Request Changes on GitHub
+              Post Change Request
             </button>
             <button
+              disabled={isPostingComment}
               onClick={() => handlePostVerdict('approve')}
               className="px-4 py-2 text-xs font-semibold text-white bg-emerald-600 hover:bg-emerald-700 rounded-xl shadow-xs"
             >
-              Post Approval Verdict
+              Suggest Approval
             </button>
           </div>
         </div>
