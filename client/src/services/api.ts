@@ -1,11 +1,25 @@
 import { PullRequest, DashboardStats, GitHubRepoItem, GitHubPRItem } from '../types';
+import { normalizeReviewAnalysis } from '../../../shared/review-analysis';
+
+function normalizePR(pr: PullRequest): PullRequest {
+  return { ...pr, ...normalizeReviewAnalysis(pr) };
+}
+
+function normalizeResult(data: any) {
+  return {
+    ...data,
+    ...(data.pullRequest ? { pullRequest: normalizePR(data.pullRequest) } : {}),
+    ...(data.pr ? { pr: normalizePR(data.pr) } : {}),
+    ...(Array.isArray(data.pullRequests) ? { pullRequests: data.pullRequests.map(normalizePR) } : {}),
+  };
+}
 
 export const api = {
   async getStats(): Promise<DashboardStats> {
     try {
       const res = await fetch('/api/stats');
       if (!res.ok) throw new Error('Failed to fetch stats');
-      return await res.json();
+      return normalizeResult(await res.json());
     } catch (e) {
       console.warn('API stats fetch failed', e);
       return {
@@ -31,7 +45,7 @@ export const api = {
       const res = await fetch(url);
       if (!res.ok) throw new Error('Failed to fetch PRs');
       const data = await res.json();
-      return data.pullRequests;
+      return data.pullRequests.map(normalizePR);
     } catch (e) {
       console.warn('API getPullRequests fetch failed', e);
       return [];
@@ -43,7 +57,7 @@ export const api = {
       const res = await fetch(`/api/prs/${id}`);
       if (!res.ok) throw new Error('Failed to fetch PR');
       const data = await res.json();
-      return data.pullRequest;
+      return normalizePR(data.pullRequest);
     } catch (e) {
       console.warn('API getPullRequestById fetch failed', e);
       return null;
@@ -57,25 +71,28 @@ export const api = {
       });
       if (!res.ok) throw new Error('Failed to toggle checklist');
       const data = await res.json();
-      return data.pr;
+      return normalizePR(data.pr);
     } catch (e) {
       console.warn('API toggleChecklistItem fetch failed', e);
       return null;
     }
   },
 
-  async postComment(prId: number, commentType: 'approve' | 'request_changes' | 'comment'): Promise<{ success: boolean; message: string; pr?: PullRequest }> {
+  async postComment(prId: number, commentType: 'approve' | 'request_changes', repo: string): Promise<{ success: boolean; message: string; pr?: PullRequest }> {
     try {
       const res = await fetch(`/api/prs/${prId}/comment`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ commentType }),
+        body: JSON.stringify({ commentType, repo }),
       });
-      if (!res.ok) throw new Error('Failed to post review comment');
-      return await res.json();
+      if (!res.ok) {
+        const data = await res.json().catch(() => ({}));
+        throw new Error(data.error || 'GitHub could not publish the notice.');
+      }
+      return normalizeResult(await res.json());
     } catch (e) {
       console.warn('API postComment fetch failed', e);
-      return { success: true, message: 'Review verdict recorded locally' };
+      return { success: false, message: e instanceof Error ? e.message : 'Could not confirm posting. Check the PR discussion before retrying.' };
     }
   },
 
@@ -83,7 +100,7 @@ export const api = {
     try {
       const res = await fetch('/api/bob/status');
       if (!res.ok) throw new Error('Failed to fetch Bob status');
-      return await res.json();
+      return normalizeResult(await res.json());
     } catch (e) {
       return { installed: false, version: '', hasKey: false };
     }
@@ -97,7 +114,7 @@ export const api = {
         body: JSON.stringify({ apiKey }),
       });
       if (!res.ok) throw new Error('Failed to configure Bob key');
-      return await res.json();
+      return normalizeResult(await res.json());
     } catch (e) {
       return { success: false, hasKey: false };
     }
@@ -122,7 +139,7 @@ export const api = {
         const err = await res.json();
         throw new Error(err.error || 'Failed to analyze PR');
       }
-      return await res.json();
+      return normalizeResult(await res.json());
     } catch (e: any) {
       console.warn('API analyzePR fetch failed', e);
       return { success: false, error: e.message || 'Analysis failed' };
@@ -139,7 +156,7 @@ export const api = {
     try {
       const res = await fetch('/api/github/status');
       if (!res.ok) throw new Error('Failed to fetch GitHub status');
-      return await res.json();
+      return normalizeResult(await res.json());
     } catch (e) {
       return { configured: false, rateLimit: { limit: 60, remaining: 50, reset: 0 } };
     }
@@ -153,7 +170,7 @@ export const api = {
         body: JSON.stringify({ token }),
       });
       if (!res.ok) throw new Error('Failed to configure GitHub token');
-      return await res.json();
+      return normalizeResult(await res.json());
     } catch (e) {
       return { success: false, configured: false };
     }
@@ -197,7 +214,7 @@ export const api = {
       const err = await res.json().catch(() => ({}));
       throw new Error(err.error || 'Failed to fetch PR detail');
     }
-    return await res.json();
+    return normalizeResult(await res.json());
   },
 
   async importAndAnalyzeGithubPR(payload: {
@@ -216,7 +233,7 @@ export const api = {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Failed to import and analyze GitHub PR');
       }
-      return await res.json();
+      return normalizeResult(await res.json());
     } catch (e: any) {
       return { success: false, error: e.message || 'Import failed' };
     }
@@ -233,7 +250,7 @@ export const api = {
         const err = await res.json().catch(() => ({}));
         throw new Error(err.error || 'Sync failed');
       }
-      return await res.json();
+      return normalizeResult(await res.json());
     } catch (e: any) {
       return { success: false, syncedCount: 0, error: e.message || 'Sync failed' };
     }
